@@ -24,27 +24,30 @@ from libdf import DF, erb, erb_norm, unit_norm
 PRETRAINED_MODELS = ("DeepFilterNet", "DeepFilterNet2", "DeepFilterNet3")
 DEFAULT_MODEL = "DeepFilterNet3"
 
+from torch.utils.data import Dataset
+from typing import List, Tuple, Optional, Union
+import torch
+import numpy as np
 
-class AudioDataset(Dataset):
-    def __init__(self, files: List[str], sr: int) -> None:
+class AudioSegmentDataset(Dataset):
+    def __init__(self, audio_segments: List['AudioSegment'], sr: int) -> None:
         super().__init__()
-        self.files = []
-        for file in files:
-            if not os.path.isfile(file):
-                logger.warning(f"File not found: {file}. Skipping...")
-            self.files.append(file)
+        self.audio_segments = audio_segments
         self.sr = sr
 
-    def __getitem__(self, index) -> Tuple[str, Tensor, int]:
-        fn = self.files[index]
-        audio, meta = load_audio(fn, self.sr, "cpu")
-        return fn, audio, meta.sample_rate
+    def __getitem__(self, index) -> Tuple[str, torch.Tensor, int]:
+        audioseg = self.audio_segments[index]
+        arr = np.array(
+            audioseg.set_frame_rate(self.sr).set_channels(1).get_array_of_samples()
+        ).astype(np.float32) / (2 ** 15)
+        audio = torch.tensor(arr, dtype=torch.float32)
+        return f"audioseg_{index}", audio, self.sr
 
     def __len__(self):
-        return len(self.files)
-
+        return len(self.audio_segments)
 
 def main(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, df_state, suffix, epoch = init_df(
         args.model_base_dir,
         post_filter=args.pf,
@@ -53,23 +56,30 @@ def main(args):
         epoch=args.epoch,
         mask_only=args.no_df_stage,
     )
+    model = model.to(device)
     suffix = suffix if args.suffix else None
     if args.output_dir is None:
         args.output_dir = "."
     elif not os.path.isdir(args.output_dir):
         os.mkdir(args.output_dir)
     df_sr = ModelParams().sr
-    if args.noisy_dir is not None:
+
+    if hasattr(args, "audio_segments") and args.audio_segments is not None:
+        ds = AudioSegmentDataset(args.audio_segments, df_sr)
+    elif args.noisy_dir is not None:
         if len(args.noisy_audio_files) > 0:
             logger.error("Only one of `noisy_audio_files` or `noisy_dir` arguments are supported.")
             exit(1)
         input_files = glob.glob(args.noisy_dir + "/*")
+        ds = AudioDataset(input_files, df_sr)
     else:
         assert len(args.noisy_audio_files) > 0, "No audio files provided"
         input_files = args.noisy_audio_files
-    ds = AudioDataset(input_files, df_sr)
+        ds = AudioDataset(input_files, df_sr)
+
     loader = DataLoader(ds, num_workers=2, pin_memory=True)
     n_samples = len(ds)
+    results = []
     for i, (file, audio, audio_sr) in enumerate(loader):
         file = file[0]
         audio = audio.squeeze(0)
@@ -85,8 +95,74 @@ def main(args):
         fn = os.path.basename(file)
         p_str = f"{progress:2.0f}% | " if n_samples > 1 else ""
         logger.info(f"{p_str}Enhanced noisy audio file '{fn}' in {t:.2f}s (RT factor: {rtf:.3f})")
-        audio = resample(audio.to("cpu"), df_sr, audio_sr)
-        save_audio(file, audio, sr=audio_sr, output_dir=args.output_dir, suffix=suffix, log=False)
+        audio = resample(audio.to("cpu"), df_sr, 16000)
+        audio = audio.numpy()
+        results.append(audio)
+    return results
+
+    
+# class AudioDataset(Dataset):
+#     def __init__(self, files: List[str], sr: int) -> None:
+#         super().__init__()
+#         self.files = []
+#         for file in files:
+#             if not os.path.isfile(file):
+#                 logger.warning(f"File not found: {file}. Skipping...")
+#             self.files.append(file)
+#         self.sr = sr
+
+#     def __getitem__(self, index) -> Tuple[str, Tensor, int]:
+#         fn = self.files[index]
+#         audio, meta = load_audio(fn, self.sr, "cpu")
+#         return fn, audio, meta.sample_rate
+
+#     def __len__(self):
+#         return len(self.files)
+
+
+# def main(args):
+#     model, df_state, suffix, epoch = init_df(
+#         args.model_base_dir,
+#         post_filter=args.pf,
+#         log_level=args.log_level,
+#         config_allow_defaults=True,
+#         epoch=args.epoch,
+#         mask_only=args.no_df_stage,
+#     )
+#     suffix = suffix if args.suffix else None
+#     if args.output_dir is None:
+#         args.output_dir = "."
+#     elif not os.path.isdir(args.output_dir):
+#         os.mkdir(args.output_dir)
+#     df_sr = ModelParams().sr
+#     if args.noisy_dir is not None:
+#         if len(args.noisy_audio_files) > 0:
+#             logger.error("Only one of `noisy_audio_files` or `noisy_dir` arguments are supported.")
+#             exit(1)
+#         input_files = glob.glob(args.noisy_dir + "/*")
+#     else:
+#         assert len(args.noisy_audio_files) > 0, "No audio files provided"
+#         input_files = args.noisy_audio_files
+#     ds = AudioDataset(input_files, df_sr)
+#     loader = DataLoader(ds, num_workers=2, pin_memory=True)
+#     n_samples = len(ds)
+#     for i, (file, audio, audio_sr) in enumerate(loader):
+#         file = file[0]
+#         audio = audio.squeeze(0)
+#         progress = (i + 1) / n_samples * 100
+#         t0 = time.time()
+#         audio = enhance(
+#             model, df_state, audio, pad=args.compensate_delay, atten_lim_db=args.atten_lim
+#         )
+#         t1 = time.time()
+#         t_audio = audio.shape[-1] / df_sr
+#         t = t1 - t0
+#         rtf = t / t_audio
+#         fn = os.path.basename(file)
+#         p_str = f"{progress:2.0f}% | " if n_samples > 1 else ""
+#         logger.info(f"{p_str}Enhanced noisy audio file '{fn}' in {t:.2f}s (RT factor: {rtf:.3f})")
+#         audio = resample(audio.to("cpu"), df_sr, audio_sr)
+#         save_audio(file, audio, sr=audio_sr, output_dir=args.output_dir, suffix=suffix, log=False)
 
 
 def get_model_basedir(m: Optional[str]) -> str:
