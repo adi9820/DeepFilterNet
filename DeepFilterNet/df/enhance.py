@@ -20,15 +20,16 @@ from df.modules import get_device
 from df.utils import as_complex, as_real, download_file, get_cache_dir, get_norm_alpha
 from df.version import version
 from libdf import DF, erb, erb_norm, unit_norm
-
+import io
 PRETRAINED_MODELS = ("DeepFilterNet", "DeepFilterNet2", "DeepFilterNet3")
 DEFAULT_MODEL = "DeepFilterNet3"
-
+import soundfile as sf
 from torch.utils.data import Dataset
 from typing import List, Tuple, Optional, Union
 import torch
 import numpy as np
-    
+
+
 class AudioDataset(Dataset):
     def __init__(self, files: List[str], sr: int) -> None:
         super().__init__()
@@ -47,8 +48,6 @@ class AudioDataset(Dataset):
     def __len__(self):
         return len(self.files)
 
-import io
-import soundfile as sf
 
 def main(args):
     model, df_state, suffix, epoch = init_df(
@@ -98,13 +97,26 @@ def main(args):
 
         # Write audio to BytesIO buffer as wav
         audio_bytes = io.BytesIO()
-        sf.write(audio_bytes, audio.numpy(), audio_sr, format='WAV')
+        audio_np = audio.detach().cpu().numpy()
+        if audio_np.ndim == 2 and audio_np.shape[0] == 1:
+            audio_np = audio_np[0]
+        if audio_np.ndim > 1 and audio_np.shape[0] < audio_np.shape[1]:
+            audio_np = audio_np.T  # (channels, N) to (N, channels)
+        audio_np = audio_np.astype("float32")
+        audio_sr = int(audio_sr)  # ensure sample rate is int
+
+        print("audio_np shape:", audio_np.shape, "dtype:", audio_np.dtype)
+        print("audio_sr:", audio_sr, type(audio_sr))
+
+        sf.write(audio_bytes, audio_np, audio_sr, format='WAV')
         audio_bytes.seek(0)
-        
+
+
         # Collect results: filename and bytes
         enhanced_audios.append({'filename': fn, 'wav_bytes': audio_bytes})
 
     return enhanced_audios  # List of dicts: [{'filename': ..., 'wav_bytes': BytesIO}, ...]
+
 
 # def main(args):
 #     model, df_state, suffix, epoch = init_df(
