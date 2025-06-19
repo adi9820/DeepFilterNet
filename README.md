@@ -102,6 +102,15 @@ deepFilter path/to/noisy_audio.wav
 
 ### Manual Installation
 
+#### My Setup
+
+git clone https://github.com/adi9820/DeepFilterNet
+pip install maturin poetry
+poetry -C DeepFilterNet install -E train -E eval
+apt-get update
+apt-get install -y build-essential python3-dev rustc cargo libhdf5-dev
+maturin develop --release -m pyDF/Cargo.toml
+
 Install cargo via [rustup](https://rustup.rs/). Usage of a `conda` or `virtualenv` recommended.
 Please read the comments and only execute the commands that you need.
 
