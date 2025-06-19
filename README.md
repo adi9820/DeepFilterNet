@@ -116,6 +116,7 @@ apt-get install -y build-essential python3-dev rustc cargo libhdf5-dev
 
 maturin develop --release -m pyDF/Cargo.toml
 
+#### Setup
 
 Install cargo via [rustup](https://rustup.rs/). Usage of a `conda` or `virtualenv` recommended.
 Please read the comments and only execute the commands that you need.
