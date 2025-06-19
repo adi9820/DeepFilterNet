@@ -106,6 +106,10 @@ deepFilter path/to/noisy_audio.wav
 
 git clone https://github.com/adi9820/DeepFilterNet
 
+or 
+
+git clone https://github.com/Rikorose/DeepFilterNet
+
 pip install maturin poetry
 
 poetry -C DeepFilterNet install -E train -E eval
