@@ -75,6 +75,7 @@ def main(args):
         audio = audio.squeeze(0)
         progress = (i + 1) / n_samples * 100
         t0 = time.time()
+        audio = audio.contiguous()####
         audio = enhance(
             model, df_state, audio, pad=args.compensate_delay, atten_lim_db=args.atten_lim
         )
